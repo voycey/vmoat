@@ -5,7 +5,7 @@ class Vmoat < Formula
   desc "Ephemeral Colima VM per git worktree for parallel, isolated build and test"
   homepage "https://github.com/voycey/vmoat"
   url "https://github.com/voycey/vmoat/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "REPLACE_WITH_TARBALL_SHA256_AFTER_TAGGING"
+  sha256 "4a1170e5a80cdf9cf6efbc1b40b4dfea5ed96cffdcd50b8511c82e52e08bc58f"
   license "MIT"
   head "https://github.com/voycey/vmoat.git", branch: "main"
 
