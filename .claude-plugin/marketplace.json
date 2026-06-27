@@ -1,0 +1,11 @@
+{
+  "name": "worktree-vm",
+  "owner": { "name": "Dan Voyce" },
+  "plugins": [
+    {
+      "name": "worktree-vm",
+      "source": "./",
+      "description": "One ephemeral Colima VM per git worktree: build & test multiple worktrees in parallel, each isolated in its own kernel + Docker daemon. Runs the project's stock build/test commands inside the VM; browser stays on the host via an SSH tunnel."
+    }
+  ]
+}
