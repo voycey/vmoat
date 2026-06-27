@@ -79,6 +79,14 @@ load_config() {
   else
     warn "No vmoat.conf at $REPO_ROOT -- using defaults. Copy vmoat.example.conf to get started."
   fi
+  # Per-worktree override. vmoat.local.conf is gitignored, so it exists only in
+  # THIS worktree's directory -- sourced last, it wins. Use it to give one
+  # worktree different EXPOSE_PORTS / sizing / commands without touching (or
+  # committing to) the shared vmoat.conf.
+  if [ -f "$REPO_ROOT/vmoat.local.conf" ]; then
+    # shellcheck disable=SC1090
+    . "$REPO_ROOT/vmoat.local.conf"
+  fi
 }
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,8 @@
 # vmoat
-
-> **A moat around every git worktree.** One ephemeral [Colima](https://github.com/abiosoft/colima) VM per worktree, so you can build and test multiple worktrees of the same project **in parallel** — each sealed in its own Linux kernel + Docker daemon.
+<p align="center">
+  <img src="docs/vmoat.jpeg" alt="A moat around every worktree" width="840">
+</p> 
+**A moat around every git worktree.** One ephemeral [Colima](https://github.com/abiosoft/colima) VM per worktree, so you can build and test multiple worktrees of the same project **in parallel** — each sealed in its own Linux kernel + Docker daemon.
 
 [![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-D97757)](https://code.claude.com/docs/en/plugins)
 [![POSIX sh](https://img.shields.io/badge/POSIX-sh-4EAA25?logo=gnubash&logoColor=white)](./bin/vmoat)
@@ -9,7 +11,9 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![version](https://img.shields.io/badge/version-0.1.0-blue)](./.claude-plugin/plugin.json)
 
-A `docker system prune`, an OOM, or a crashed stack in one worktree can **never** touch another worktree or your host. The VM *is* the moat: inside it you run your project's **stock** commands (`./deploy.sh local`, `make up`, `docker compose up` …) with all defaults — no port-juggling, and **every existing test passes unmodified**, because inside the box `localhost` *is* the stack.
+A `docker system prune`, an OOM, or a crashed stack in one worktree can **never** touch another worktree or your host. 
+
+The VM *is* the moat: inside it you run your project's **stock** commands (`./deploy.sh local`, `make up`, `docker compose up` …) with all defaults — no port-juggling, and **every existing test passes unmodified**, because inside the box `localhost` *is* the stack.
 
 <p align="center">
   <img src="docs/01-isolation.svg" alt="A crash in one worktree's VM can't escape it — separate VM means separate kernel and daemon, so a prune/OOM/crash in one VM can't reach the others or the host." width="840">
@@ -111,6 +115,18 @@ Copy [`vmoat.example.conf`](./vmoat.example.conf) to your repo root as `vmoat.co
 | `HEALTH_URL` / `HEALTH_TIMEOUT` | no | if set, `up` waits until this URL returns 2xx inside the VM |
 | `EXPOSE_PORTS` | no | guest ports (bash array or space-separated string) `tunnel` surfaces to the host |
 | `VM_TYPE` / `MOUNT_TYPE` | no | force a Colima backend (otherwise auto-detected per platform) |
+
+### Per-worktree overrides — `vmoat.local.conf`
+
+`vmoat.conf` is committed, so it's shared by every worktree on that branch. When **one** worktree needs different settings — most often a different `EXPOSE_PORTS` because it runs different code — drop a **`vmoat.local.conf`** in that worktree's directory. It's **gitignored**, so it exists only in that worktree, and it's sourced **after** `vmoat.conf`, so it wins:
+
+```sh
+# .../worktrees/feature-x/vmoat.local.conf  (gitignored — only this worktree)
+EXPOSE_PORTS=(30001 38003 9229)   # this branch adds a debug port
+VM_MEMORY=24                      # …and needs more RAM
+```
+
+Add `vmoat.local.conf` to your repo's `.gitignore`. Any key (ports, sizing, commands, health) can be overridden per worktree this way — shared defaults in `vmoat.conf`, per-worktree deltas in `vmoat.local.conf`.
 
 <details>
 <summary>Example: a RAG stack driven by <code>./deploy.sh</code></summary>
