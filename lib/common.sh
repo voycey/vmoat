@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # common.sh -- shared helpers, config loading, worktree/VM resolution.
-# Sourced by bin/worktree-vm. Targets bash 3.2 (macOS default).
+# Sourced by bin/vmoat. Targets bash 3.2 (macOS default).
 
 # ---------------------------------------------------------------------------
 # logging
@@ -12,7 +12,7 @@ else
   _NC=; _BOLD=; _DIM=; _RED=; _GRN=; _YLW=; _BLU=
 fi
 
-_tag() { printf '%s[worktree-vm]%s' "$_BLU" "$_NC"; }
+_tag() { printf '%s[vmoat]%s' "$_BLU" "$_NC"; }
 log()  { printf '%s %s\n' "$(_tag)" "$*" >&2; }
 ok()   { printf '%s %s%s%s\n' "$(_tag)" "$_GRN" "$*" "$_NC" >&2; }
 warn() { printf '%s %s%s%s\n' "$(_tag)" "$_YLW" "$*" "$_NC" >&2; }
@@ -41,13 +41,13 @@ wtvm_platform() {
 WTVM_PLATFORM="$(wtvm_platform)"
 
 # ---------------------------------------------------------------------------
-# config defaults (overridden by <repo>/worktree-vm.conf, which is sourced)
+# config defaults (overridden by <repo>/vmoat.conf, which is sourced)
 # ---------------------------------------------------------------------------
 VM_PREFIX="wt-"
 VM_CPU=4
 VM_MEMORY=8
 VM_DISK=60
-# VM backend defaults are PLATFORM-AWARE (override either in worktree-vm.conf):
+# VM backend defaults are PLATFORM-AWARE (override either in vmoat.conf):
 #   macOS      -> vz + virtiofs (Virtualization.framework, fast; macOS 13+)
 #   Linux/WSL2 -> empty -> let Colima pick its native backend (qemu + KVM)
 if [ "$WTVM_PLATFORM" = "darwin" ]; then
@@ -67,16 +67,17 @@ CMD_TEST=""           # command run inside the VM to test (e.g. ./deploy.sh test
 HEALTH_URL=""         # polled INSIDE the VM after 'up' (e.g. http://127.0.0.1:38003/health)
 HEALTH_TIMEOUT=1800   # seconds to wait for health (first build can be 10-20 min)
 
-EXPOSE_UI=""          # default guest port surfaced by 'tunnel ui'
-EXPOSE_API=""         # default guest port surfaced by 'tunnel api'
+# Guest ports `tunnel` surfaces to the host. Bash array (preferred) or a
+# space-separated string both work, e.g. EXPOSE_PORTS=(30001 38003).
+EXPOSE_PORTS=()
 
 load_config() {
-  WTVM_CONFIG="$REPO_ROOT/worktree-vm.conf"
+  WTVM_CONFIG="$REPO_ROOT/vmoat.conf"
   if [ -f "$WTVM_CONFIG" ]; then
     # shellcheck disable=SC1090
     . "$WTVM_CONFIG"
   else
-    warn "No worktree-vm.conf at $REPO_ROOT -- using defaults. Copy worktree-vm.example.conf to get started."
+    warn "No vmoat.conf at $REPO_ROOT -- using defaults. Copy vmoat.example.conf to get started."
   fi
 }
 
@@ -85,7 +86,7 @@ load_config() {
 # ---------------------------------------------------------------------------
 resolve_repo() {
   REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) \
-    || die "Not inside a git repository. worktree-vm operates on the current git worktree."
+    || die "Not inside a git repository. vmoat operates on the current git worktree."
 
   # absolute common dir -> the main (primary) worktree, which holds gitignored
   # seed files like .env.keys that linked worktrees lack.
@@ -113,7 +114,7 @@ vm_name() {
 assert_mounted() {
   case "$REPO_ROOT/" in
     "$VM_MOUNT"/*) : ;;
-    *) die "Worktree ($REPO_ROOT) is not under VM_MOUNT ($VM_MOUNT); the VM could not see it. Set VM_MOUNT in worktree-vm.conf." ;;
+    *) die "Worktree ($REPO_ROOT) is not under VM_MOUNT ($VM_MOUNT); the VM could not see it. Set VM_MOUNT in vmoat.conf." ;;
   esac
 }
 
@@ -140,7 +141,7 @@ in_vm_q() {
 # host ports / runtime dir
 # ---------------------------------------------------------------------------
 runtime_dir() {
-  RUNDIR="${XDG_RUNTIME_DIR:-$HOME/.cache/worktree-vm}/$VM"
+  RUNDIR="${XDG_RUNTIME_DIR:-$HOME/.cache/vmoat}/$VM"
   mkdir -p "$RUNDIR"
 }
 

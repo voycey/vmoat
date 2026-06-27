@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# worktree-vm -- give the current git worktree its own Colima VM and run the
+# vmoat -- give the current git worktree its own Colima VM and run the
 # project's build/test commands inside it. Project-agnostic; driven by a
-# worktree-vm.conf at the consuming repo root.
+# vmoat.conf at the consuming repo root.
 #
-# Usage: worktree-vm <command> [args]
+# Usage: vmoat <command> [args]
 set -euo pipefail
 
 # resolve our own location (following symlinks) to find lib/.
@@ -23,13 +23,13 @@ LIB_DIR="$SELF_DIR/../lib"
 
 usage() {
   cat >&2 <<'EOF'
-worktree-vm -- one ephemeral Colima VM per git worktree.
+vmoat -- one ephemeral Colima VM per git worktree.
 
 Commands (operate on the CURRENT git worktree):
   provision     Create/start the worktree's VM; install toolchain; seed files.
-  up            provision + run CMD_UP inside the VM + wait for health.
+  up            provision + run CMD_UP inside the VM (+ wait for health if set).
   test [args]   Run CMD_TEST [args] inside the VM (localhost = the stack).
-  tunnel [t]    Surface an in-VM port to the host (t = ui|api|<port>, default ui).
+  tunnel [port] Forward in-VM port(s) to the host (default: every EXPOSE_PORTS).
   untunnel      Close all tunnels for this worktree's VM.
   status        Show VM status, containers, health, and open tunnels.
   ssh [cmd]     Shell into the VM (or run a command in the worktree dir).
@@ -37,7 +37,7 @@ Commands (operate on the CURRENT git worktree):
   destroy [-f]  Delete the VM entirely.
   name          Print the VM/profile name for this worktree.
 
-Config: <repo-root>/worktree-vm.conf (copy worktree-vm.example.conf).
+Config: <repo-root>/vmoat.conf (copy vmoat.example.conf).
 EOF
 }
 
@@ -46,7 +46,7 @@ main() {
 
   case "$cmd" in
     ""|help|-h|--help) usage; exit 0 ;;
-    version|--version) printf 'worktree-vm %s\n' "$WTVM_VERSION"; exit 0 ;;
+    version|--version) printf 'vmoat %s\n' "$WTVM_VERSION"; exit 0 ;;
   esac
 
   resolve_repo
@@ -57,14 +57,14 @@ main() {
     provision) cmd_provision ;;
     up)        cmd_up ;;
     test)      cmd_test "$@" ;;
-    tunnel)    cmd_tunnel "${1:-ui}" ;;
+    tunnel)    cmd_tunnel "$@" ;;
     untunnel)  cmd_untunnel ;;
     status)    cmd_status ;;
     ssh)       cmd_ssh "$@" ;;
     down)      cmd_down ;;
     destroy)   if [ "${1:-}" = "-f" ]; then WTVM_FORCE=1; fi; cmd_destroy ;;
     name)      printf '%s\n' "$VM" ;;
-    *)         die "Unknown command: '$cmd' (try 'worktree-vm help')." ;;
+    *)         die "Unknown command: '$cmd' (try 'vmoat help')." ;;
   esac
 }
 

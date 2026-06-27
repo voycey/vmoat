@@ -1,5 +1,5 @@
 {
-  "name": "worktree-vm",
+  "name": "vmoat",
   "description": "One ephemeral Colima VM per git worktree — parallel, isolated build & test.",
   "owner": {
     "name": "Dan Voyce",
@@ -7,14 +7,14 @@
   },
   "plugins": [
     {
-      "name": "worktree-vm",
+      "name": "vmoat",
       "source": "./",
-      "displayName": "worktree-vm",
+      "displayName": "vmoat",
       "description": "One ephemeral Colima VM per git worktree: build & test multiple worktrees in parallel, each isolated in its own kernel + Docker daemon. Runs the project's stock build/test commands inside the VM; browser stays on the host via an SSH tunnel.",
       "version": "0.1.0",
       "author": { "name": "Dan Voyce" },
-      "homepage": "https://github.com/voycey/worktree-vm",
-      "repository": "https://github.com/voycey/worktree-vm",
+      "homepage": "https://github.com/voycey/vmoat",
+      "repository": "https://github.com/voycey/vmoat",
       "license": "MIT",
       "keywords": ["colima", "vm", "worktree", "docker", "parallel-testing", "sandbox", "isolation"]
     }

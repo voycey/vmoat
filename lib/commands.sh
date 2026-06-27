@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# commands.sh -- subcommand implementations. Sourced by bin/worktree-vm.
+# commands.sh -- subcommand implementations. Sourced by bin/vmoat.
 
 # ---------------------------------------------------------------------------
 # provision: ensure the VM exists, is running, and has the toolchain + seeds.
@@ -89,7 +89,7 @@ cmd_provision() {
   seed_files
   if [ -n "$_prev_ctx" ] && [ "$_prev_ctx" != "colima-$VM" ]; then
     docker context use "$_prev_ctx" >/dev/null 2>&1 \
-      && log "Restored active docker context to '$_prev_ctx' (VM stays reachable via 'worktree-vm')." || true
+      && log "Restored active docker context to '$_prev_ctx' (VM stays reachable via 'vmoat')." || true
   fi
   ok "VM $VM provisioned."
 }
@@ -109,7 +109,7 @@ health_wait() {
     fi
     now=$(date +%s)
     if [ "$now" -ge "$deadline" ]; then
-      die "Health check timed out after ${HEALTH_TIMEOUT}s. Inspect: worktree-vm ssh -- docker ps"
+      die "Health check timed out after ${HEALTH_TIMEOUT}s. Inspect: vmoat ssh -- docker ps"
     fi
     if [ $(( now - last_beat )) -ge 60 ]; then
       log "... still waiting for health ($(( deadline - now ))s left). $(date '+%H:%M:%S')"
@@ -121,14 +121,14 @@ health_wait() {
 
 print_reach() {
   ok "Stack is up in VM $VM (worktree: $REPO_ROOT)."
-  log "  Tunnel UI to host:  worktree-vm tunnel ui"
-  log "  Run tests in VM:    worktree-vm test --quick"
-  log "  Shell into VM:      worktree-vm ssh"
-  log "  Stop (keep disk):   worktree-vm down      Destroy: worktree-vm destroy"
+  log "  Tunnel to host:     vmoat tunnel"
+  log "  Run tests in VM:    vmoat test --quick"
+  log "  Shell into VM:      vmoat ssh"
+  log "  Stop (keep disk):   vmoat down      Destroy: vmoat destroy"
 }
 
 cmd_up() {
-  [ -n "$CMD_UP" ] || die "CMD_UP is not set in worktree-vm.conf."
+  [ -n "$CMD_UP" ] || die "CMD_UP is not set in vmoat.conf."
   cmd_provision
   log "Running up command in VM $VM: $CMD_UP"
   in_vm "$CMD_UP" || die "'$CMD_UP' failed in VM $VM."
@@ -140,8 +140,8 @@ cmd_up() {
 # test: run CMD_TEST [args] inside the VM (localhost defaults resolve to the stack).
 # ---------------------------------------------------------------------------
 cmd_test() {
-  [ -n "$CMD_TEST" ] || die "CMD_TEST is not set in worktree-vm.conf."
-  vm_running || die "VM $VM is not running. Run 'worktree-vm up' first."
+  [ -n "$CMD_TEST" ] || die "CMD_TEST is not set in vmoat.conf."
+  vm_running || die "VM $VM is not running. Run 'vmoat up' first."
   local extra=""
   [ "$#" -gt 0 ] && extra=" $*"
   log "Running tests in VM $VM: ${CMD_TEST}${extra}"
@@ -151,35 +151,15 @@ cmd_test() {
 # ---------------------------------------------------------------------------
 # tunnel / untunnel: surface an in-VM port to the host for browser/Chrome.
 # ---------------------------------------------------------------------------
-_tunnel_target() {
-  case "$1" in
-    ui)  printf '%s' "$EXPOSE_UI" ;;
-    api) printf '%s' "$EXPOSE_API" ;;
-    ''|*[!0-9]*) printf '%s' "" ;;   # unknown name -> empty
-    *)   printf '%s' "$1" ;;          # bare number
-  esac
-}
-
-cmd_tunnel() {
-  local which="${1:-ui}" gport
-  gport=$(_tunnel_target "$which")
-  [ -n "$gport" ] || die "No port for '$which'. Set EXPOSE_UI/EXPOSE_API in worktree-vm.conf or pass a port number."
-  vm_running || die "VM $VM is not running."
-  runtime_dir
-
-  colima ssh-config -p "$VM" > "$RUNDIR/ssh-config" 2>/dev/null \
-    || die "Could not read ssh-config for $VM."
-  local halias; halias=$(awk '/^Host /{print $2; exit}' "$RUNDIR/ssh-config")
-  [ -n "$halias" ] || die "Could not parse ssh host alias for $VM."
-
-  # already-open tunnel for this target?
-  local pidf="$RUNDIR/tunnel-$which.pid" portf="$RUNDIR/tunnel-$which.port"
+# Open ONE forward: a free host port -> VM 127.0.0.1:<gport>. Prints the URL.
+_tunnel_one() {
+  local gport="$1" halias="$2"
+  local pidf="$RUNDIR/tunnel-$gport.pid" portf="$RUNDIR/tunnel-$gport.port"
   if [ -f "$pidf" ] && kill -0 "$(cat "$pidf")" 2>/dev/null; then
-    ok "Tunnel already open: http://localhost:$(cat "$portf")  ->  VM 127.0.0.1:$gport"
+    ok "Already open: http://localhost:$(cat "$portf")  ->  VM 127.0.0.1:$gport"
     printf 'http://localhost:%s\n' "$(cat "$portf")"
     return 0
   fi
-
   local hport; hport=$(_free_port)
   # ControlMaster=no + ControlPath=none: give the tunnel its OWN connection.
   # colima's ssh-config enables mux; attaching to its persistent master makes
@@ -188,14 +168,38 @@ cmd_tunnel() {
     -o ControlMaster=no -o ControlPath=none \
     -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
     -L "127.0.0.1:$hport:127.0.0.1:$gport" "$halias" >/dev/null 2>&1 &
-  echo $! > "$pidf"
-  echo "$hport" > "$portf"
+  echo $! > "$pidf"; echo "$hport" > "$portf"
   sleep 1
   if ! kill -0 "$(cat "$pidf")" 2>/dev/null; then
-    rm -f "$pidf" "$portf"; die "Tunnel failed to establish."
+    rm -f "$pidf" "$portf"; die "Tunnel to VM port $gport failed to establish."
   fi
-  ok "Tunnel open: http://localhost:$hport  ->  VM $VM 127.0.0.1:$gport  (close: worktree-vm untunnel)"
+  ok "Tunnel open: http://localhost:$hport  ->  VM $VM 127.0.0.1:$gport  (close: vmoat untunnel)"
   printf 'http://localhost:%s\n' "$hport"
+}
+
+#   vmoat tunnel            -> a forward for every EXPOSE_PORTS entry
+#   vmoat tunnel <port> ... -> a forward for each given guest port
+cmd_tunnel() {
+  vm_running || die "VM $VM is not running."
+  runtime_dir
+  colima ssh-config -p "$VM" > "$RUNDIR/ssh-config" 2>/dev/null \
+    || die "Could not read ssh-config for $VM."
+  local halias; halias=$(awk '/^Host /{print $2; exit}' "$RUNDIR/ssh-config")
+  [ -n "$halias" ] || die "Could not parse ssh host alias for $VM."
+
+  local ports p
+  if [ "$#" -gt 0 ]; then
+    ports="$*"
+  else
+    # EXPOSE_PORTS may be a bash array (preferred) or a space-separated string;
+    # [*] joins either to a string, set-u-safe for an empty/unset array.
+    ports="${EXPOSE_PORTS[*]+${EXPOSE_PORTS[*]}}"
+  fi
+  [ -n "$ports" ] || die "No ports to tunnel. Set EXPOSE_PORTS in vmoat.conf, or pass one: vmoat tunnel <port>."
+  for p in $ports; do
+    case "$p" in ''|*[!0-9]*) die "Not a port number: '$p'." ;; esac
+    _tunnel_one "$p" "$halias"
+  done
 }
 
 cmd_untunnel() {
@@ -244,7 +248,7 @@ cmd_down() {
   vm_exists || { log "VM $VM does not exist."; return 0; }
   cmd_untunnel
   colima stop -p "$VM" || die "colima stop failed."
-  ok "Stopped $VM (disk kept). 'worktree-vm up' to resume, 'destroy' to remove."
+  ok "Stopped $VM (disk kept). 'vmoat up' to resume, 'destroy' to remove."
 }
 
 cmd_destroy() {
