@@ -5,8 +5,15 @@
 # provision: ensure the VM exists, is running, and has the toolchain + seeds.
 # ---------------------------------------------------------------------------
 preflight_ram() {
-  command -v sysctl >/dev/null 2>&1 || return 0
-  local total_gb; total_gb=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))
+  # Portable host-RAM probe. On WSL2 this reads the RAM allotted to the WSL VM
+  # (set in .wslconfig) -- which is exactly the budget Colima has to work with.
+  local total_gb=0
+  if [ "$WTVM_PLATFORM" = "darwin" ]; then
+    total_gb=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))
+  elif [ -r /proc/meminfo ]; then
+    local kb; kb=$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null)
+    [ -n "$kb" ] && total_gb=$(( kb / 1048576 ))
+  fi
   [ "$total_gb" -gt 0 ] || return 0
   if [ "$VM_MEMORY" -ge "$total_gb" ]; then
     warn "VM_MEMORY=${VM_MEMORY}G is >= host RAM (${total_gb}G). The VM will likely thrash."
@@ -52,7 +59,7 @@ seed_files() {
 }
 
 cmd_provision() {
-  need colima "Install with: brew install colima docker"
+  need colima "Install Colima (macOS/Linux: 'brew install colima docker'; WSL2: install in the distro + enable nested virtualization). See the README."
   assert_mounted
   # `colima start` flips the user's ACTIVE docker context to colima-<vm>. Capture
   # the prior context and restore it at the end, so a user's plain `docker` keeps
@@ -65,10 +72,15 @@ cmd_provision() {
     colima start -p "$VM" || die "colima start failed for $VM."
   else
     preflight_ram
-    log "Creating VM $VM..."
+    log "Creating VM $VM (platform: $WTVM_PLATFORM)..."
+    # Only pass --vm-type/--mount-type when set (macOS pins vz+virtiofs; on
+    # Linux/WSL2 they're empty so Colima picks its native qemu/KVM backend).
+    # The ${arr[@]+...} guard keeps an empty array safe under `set -u` (bash 3.2).
+    local -a _backend=()
+    [ -n "$VM_TYPE" ] && _backend+=(--vm-type "$VM_TYPE")
+    [ -n "$MOUNT_TYPE" ] && _backend+=(--mount-type "$MOUNT_TYPE")
     colima start -p "$VM" \
-      --vm-type "$VM_TYPE" \
-      --mount-type "$MOUNT_TYPE" \
+      ${_backend[@]+"${_backend[@]}"} \
       --cpu "$VM_CPU" --memory "$VM_MEMORY" --disk "$VM_DISK" \
       --mount "$VM_MOUNT:w" \
       || die "colima start failed for $VM. (Check 'colima start --help' for flag support on your version.)"

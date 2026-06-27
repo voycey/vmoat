@@ -25,6 +25,21 @@ need() {
 # bash-builtin shell quoting (bash 3.2 has printf %q)
 _q() { printf '%q' "$1"; }
 
+# platform: darwin | wsl | linux | other  (drives the VM-backend defaults below)
+wtvm_platform() {
+  case "$(uname -s)" in
+    Darwin) printf 'darwin' ;;
+    Linux)
+      if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null; then
+        printf 'wsl'
+      else
+        printf 'linux'
+      fi ;;
+    *) printf 'other' ;;
+  esac
+}
+WTVM_PLATFORM="$(wtvm_platform)"
+
 # ---------------------------------------------------------------------------
 # config defaults (overridden by <repo>/worktree-vm.conf, which is sourced)
 # ---------------------------------------------------------------------------
@@ -32,8 +47,14 @@ VM_PREFIX="wt-"
 VM_CPU=4
 VM_MEMORY=8
 VM_DISK=60
-VM_TYPE="vz"          # vz (Virtualization.framework, macOS 13+) or qemu
-MOUNT_TYPE="virtiofs" # virtiofs (fast, vz) or sshfs (qemu fallback)
+# VM backend defaults are PLATFORM-AWARE (override either in worktree-vm.conf):
+#   macOS      -> vz + virtiofs (Virtualization.framework, fast; macOS 13+)
+#   Linux/WSL2 -> empty -> let Colima pick its native backend (qemu + KVM)
+if [ "$WTVM_PLATFORM" = "darwin" ]; then
+  VM_TYPE="vz"; MOUNT_TYPE="virtiofs"
+else
+  VM_TYPE=""; MOUNT_TYPE=""
+fi
 VM_MOUNT="$HOME"      # host path mounted writable into the VM (must contain the worktree)
 
 PROVISION_APT=""      # apt packages to install in the VM

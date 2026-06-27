@@ -16,8 +16,9 @@ operates on the **current** git worktree.
 
 ## Preconditions (check first)
 
-1. `command -v colima` — if missing, tell the user to `brew install colima docker`
-   (a one-time setup; do not install it silently — it's a heavy dependency).
+1. `command -v colima` — if missing, tell the user to install it (macOS/Linux:
+   `brew install colima docker`; Windows: inside WSL2 with nested virtualization
+   enabled). A one-time setup; do not install it silently — it's a heavy dependency.
 2. A `worktree-vm.conf` exists at the repo root (`git rev-parse --show-toplevel`).
    If not, copy `worktree-vm.example.conf` and fill in `CMD_UP`/`CMD_TEST`/`HEALTH_URL`.
 3. Resources: the first `up` spins a multi-GB VM and **builds the project's images

@@ -4,7 +4,7 @@
 
 [![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-D97757)](https://code.claude.com/docs/en/plugins)
 [![POSIX sh](https://img.shields.io/badge/POSIX-sh-4EAA25?logo=gnubash&logoColor=white)](./bin/worktree-vm)
-[![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple_Silicon-000000?logo=apple&logoColor=white)](#requirements)
+[![platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20WSL2-555?logo=linux&logoColor=white)](#requirements)
 [![runtime: Colima](https://img.shields.io/badge/runtime-Colima-2496ED?logo=docker&logoColor=white)](https://github.com/abiosoft/colima)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![version](https://img.shields.io/badge/version-0.1.0-blue)](./.claude-plugin/plugin.json)
@@ -35,17 +35,29 @@ Running N stacks on a single Docker daemon with different project names/ports wo
 
 ## Requirements
 
-- macOS (Apple Silicon recommended — uses the `vz` + `virtiofs` fast path)
-- [`colima`](https://github.com/abiosoft/colima) and a `docker` CLI: `brew install colima docker`
-- Enough RAM for the stacks you run concurrently (a heavy stack ≈ several GB each)
+- **macOS** (Apple Silicon recommended — fast `vz` + `virtiofs` backend), **Linux**, or **Windows + WSL2** (Colima runs on `qemu` + KVM there).
+- [`colima`](https://github.com/abiosoft/colima) and a `docker` CLI.
+- Enough RAM for the stacks you run concurrently (a heavy stack ≈ several GB each).
+
+The VM backend is **auto-detected** (macOS → `vz`+`virtiofs`; Linux/WSL2 → Colima's native `qemu`+KVM). Override per project via `VM_TYPE` / `MOUNT_TYPE`.
 
 ## Install
+
+### Install Colima (one-time)
+
+- **macOS / Linux:** `brew install colima docker`
+- **Windows (WSL2):** install Colima **inside** your WSL2 distro (Homebrew-on-Linux or your distro's package), and enable nested virtualization in `%UserProfile%\.wslconfig`:
+  ```ini
+  [wsl2]
+  nestedVirtualization=true
+  ```
+  Run `worktree-vm` inside the distro, with your worktrees on the Linux filesystem (`~/...`, **not** `/mnt/c` — far faster).
 
 ### As a CLI
 
 ```sh
 git clone https://github.com/voycey/worktree-vm ~/.worktree-vm
-ln -s ~/.worktree-vm/bin/worktree-vm /usr/local/bin/worktree-vm
+ln -s ~/.worktree-vm/bin/worktree-vm /usr/local/bin/worktree-vm   # or ~/.local/bin
 ```
 
 ### As a Claude Code plugin
@@ -130,6 +142,7 @@ EXPOSE_API=38003
 - **First `up` per VM is slow** (~10–20 min) — it builds the project's images with no cache shared between VMs. Subsequent runs reuse them.
 - **Disk:** images are duplicated per VM. Budget `VM_DISK` accordingly.
 - **RAM is the ceiling** on how many run at once.
+- **Backend differs by platform:** macOS gets `vz`+`virtiofs` (fast); Linux/WSL2 use `qemu`+KVM. On WSL2, nested virtualization must be enabled or `colima start` can't boot the VM.
 - Some stacks abort the *very first* `up` on a fresh DB volume (a `depends_on: service_healthy` catching `initdb` mid-restart) — just re-run `up`.
 
 ## Publishing your own plugin
