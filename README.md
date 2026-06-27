@@ -70,10 +70,22 @@ The VM backend is **auto-detected** (macOS → `vz`+`virtiofs`; Linux/WSL2 → C
 
 ### As a CLI
 
+**Homebrew (recommended):**
+
+```sh
+brew install voycey/vmoat/vmoat
+```
+
+This installs the `vmoat` CLI and Colima. (You also need a `docker` CLI — Docker
+Desktop, OrbStack, or `brew install docker`.)
+
+<details><summary>…or from source</summary>
+
 ```sh
 git clone https://github.com/voycey/vmoat ~/.vmoat
 ln -s ~/.vmoat/bin/vmoat /usr/local/bin/vmoat   # or ~/.local/bin
 ```
+</details>
 
 ### As a Claude Code plugin
 
