@@ -19,17 +19,44 @@ operates on the **current** git worktree.
 1. `command -v colima` — if missing, tell the user to install it (macOS/Linux:
    `brew install colima docker`; Windows: inside WSL2 with nested virtualization
    enabled). A one-time setup; do not install it silently — it's a heavy dependency.
-2. `vmoat.conf` is **optional**. For a standard project vmoat auto-detects the
-   start command (compose / Makefile `up:` / `package.json` `dev`) and auto-discovers
-   ports — just `vmoat up`. Only if `up` reports it can't detect how to start the
-   project, run `vmoat init` (scaffolds a `vmoat.conf`) or set `CMD_UP` (and
-   `CMD_TEST` if you'll run `vmoat test`). A per-worktree `vmoat.local.conf`
-   (gitignored) overrides any key for one worktree.
+2. `vmoat.conf` is **optional** (auto-detected for standard projects). When it's
+   missing, **Step 0 below** has you author one from the project — do that before
+   `up` unless it's a plain `docker compose` project that needs no provisioning. A
+   per-worktree `vmoat.local.conf` (gitignored) overrides any key for one worktree.
 3. Resources: the first `up` spins a multi-GB VM and **builds the project's images
    inside it (10–20 min)**. Confirm with the user before provisioning if other heavy
    work (ingest, builds, other VMs) may be running — it competes for RAM/CPU.
 
 ## Workflow
+
+### 0. Ensure a good config (author `vmoat.conf` if missing)
+
+If the worktree has **no `vmoat.conf`**, prefer to **author one yourself** rather than
+relying on the shell auto-detect — you can read the project and infer a far better
+config than the heuristic can. Inspect the repo and determine:
+
+- **`CMD_UP`** — how this project *actually* starts locally. Look at the README /
+  CONTRIBUTING, a `deploy.sh` / `run.sh` / `bin/`, `Makefile` targets, `docker-compose*.yml`,
+  `package.json` scripts, `Procfile`/`Taskfile`, and especially `.github/workflows/*`
+  (the CI "start the app" step). Capture the **exact** command, including required env
+  (e.g. `INSTANCE_NAME=local VERSION=local ./deploy.sh local`).
+- **`CMD_TEST`** — the project's canonical test entry (the CI test step, `make test`,
+  `npm test`, `pytest`, `./deploy.sh test`).
+- **Provisioning a fresh worktree** — a fresh `git worktree` lacks gitignored files. If
+  the build needs any (secrets/keys like `.env.keys`, a gitignored `config.local.yaml`,
+  a decrypt key), add them to **`PROVISION_SEED`** (copied from the main checkout); put
+  host-install tooling (e.g. dotenvx) in **`PROVISION_SCRIPT`** and system packages in
+  **`PROVISION_APT`**.
+- **`HEALTH_URL`** (only if there's a real readiness endpoint) and **`VM_MEMORY`/`VM_CPU`**
+  (bump for heavy stacks — DBs, ML, big builds). Leave `EXPOSE_PORTS` unset unless you
+  must pin ports — `tunnel` auto-discovers published ports.
+
+Write it to **`vmoat.conf`** at the repo root (shared, committable). For a setting that
+should apply to **only this worktree** (e.g. a debug port this branch adds), put it in a
+gitignored **`vmoat.local.conf`** instead. **Show the user the config you wrote and let
+them confirm/adjust before `up`.** (`vmoat init` scaffolds a minimal template if you'd
+rather start from one.) A plain `docker compose` project with no provisioning needs can
+skip this and rely on auto-detect.
 
 ### 1. Identify the VM
 ```
