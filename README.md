@@ -1,57 +1,80 @@
 # worktree-vm
 
-**One ephemeral [Colima](https://github.com/abiosoft/colima) VM per git worktree.**
-Build and test multiple worktrees of the same project *in parallel*, each fully
-isolated in its own Linux kernel + Docker daemon — so a `docker system prune`,
-an OOM, or a crashed stack in one worktree can never touch another or your host.
+> **One ephemeral [Colima](https://github.com/abiosoft/colima) VM per git worktree.** Build and test multiple worktrees of the same project **in parallel**, each fully isolated in its own Linux kernel + Docker daemon.
 
-Inside each VM you run your project's **stock** commands (e.g. `./deploy.sh local`,
-`./deploy.sh test`) with all defaults — no port-juggling, no project renaming, no
-test changes. The VM *is* the isolation boundary.
+[![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-D97757)](https://code.claude.com/docs/en/plugins)
+[![POSIX sh](https://img.shields.io/badge/POSIX-sh-4EAA25?logo=gnubash&logoColor=white)](./bin/worktree-vm)
+[![macOS Apple Silicon](https://img.shields.io/badge/macOS-Apple_Silicon-000000?logo=apple&logoColor=white)](#requirements)
+[![runtime: Colima](https://img.shields.io/badge/runtime-Colima-2496ED?logo=docker&logoColor=white)](https://github.com/abiosoft/colima)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+[![version](https://img.shields.io/badge/version-0.1.0-blue)](./.claude-plugin/plugin.json)
 
-Ships as both a **POSIX-sh CLI** and a **Claude Code plugin** (skill + `/worktree-vm`
-command) so an agent can drive it. It is project-agnostic: everything specific to a
-repo lives in a small `worktree-vm.conf`.
+A `docker system prune`, an OOM, or a crashed stack in one worktree can **never** touch another worktree or your host. Inside each VM you run your project's **stock** commands (`./deploy.sh local`, `make up`, `docker compose up` …) with all defaults — the VM *is* the isolation boundary, so there's no port-juggling and **every existing test passes unmodified**, because inside the box `localhost` *is* the stack.
 
-## Why a VM per worktree (not namespaced stacks on one daemon)
+```
+                    ┌──────────────────────── your Mac (host) ────────────────────────┐
+                    │                                                                  │
+   git worktree A ──┼──▶  Colima VM  wt-feature-a   ┌─ own kernel + Docker daemon ─┐   │
+                    │       └ ./deploy.sh local ──▶ │ postgres · redis · api · ui  │   │
+                    │       reachable via  worktree-vm tunnel ui → localhost:9002  │   │
+                    │                                └──────────────────────────────┘  │
+   git worktree B ──┼──▶  Colima VM  wt-feature-b   ┌─ separate kernel + daemon ───┐   │
+                    │       └ ./deploy.sh local ──▶ │  …a full second stack…       │   │
+                    │                                └──────────────────────────────┘  │
+                    │   `prune`/OOM/crash in A  ✗──/──▶  B   ✗──/──▶  host             │
+                    └──────────────────────────────────────────────────────────────────┘
+```
 
-Running N stacks on one Docker daemon with different project names/ports works until
-any one worktree runs `docker system prune`, `down --volumes`, or blows up RAM/disk —
-then every stack dies. Separate VMs = separate daemons = no shared blast radius. The
-bonus: inside each VM the stack owns the default ports, so `localhost:38003` *is* the
-stack and every existing test passes unmodified.
+Ships as **both a POSIX-sh CLI and a Claude Code plugin** (a skill + a `/worktree-vm` command), so a coding agent can spin up and test a worktree in isolation on its own. It is **project-agnostic**: everything specific to a repo lives in a small `worktree-vm.conf`.
+
+---
+
+## Why not just namespace stacks on one daemon?
+
+Running N stacks on a single Docker daemon with different project names/ports works — until one worktree runs `docker system prune`, `down --volumes`, or blows up RAM/disk, and **every** stack dies. Separate VMs = separate daemons = **no shared blast radius**. The bonus: inside each VM the stack owns the default ports, so `localhost:38003` *is* the stack and tests need zero changes.
+
+## Requirements
+
+- macOS (Apple Silicon recommended — uses the `vz` + `virtiofs` fast path)
+- [`colima`](https://github.com/abiosoft/colima) and a `docker` CLI: `brew install colima docker`
+- Enough RAM for the stacks you run concurrently (a heavy stack ≈ several GB each)
 
 ## Install
 
+### As a CLI
+
 ```sh
-brew install colima docker          # the only hard dependency
-git clone <this-repo> ~/.worktree-vm
+git clone https://github.com/voycey/worktree-vm ~/.worktree-vm
 ln -s ~/.worktree-vm/bin/worktree-vm /usr/local/bin/worktree-vm
 ```
 
-As a Claude Code plugin: install this repo as a plugin; its skill + `/worktree-vm`
-command then drive the same CLI.
+### As a Claude Code plugin
 
-## Use
-
-From any worktree of a configured project:
-
-```sh
-worktree-vm up              # create VM, install toolchain, ./deploy.sh local, wait healthy
-worktree-vm test --quick    # run ./deploy.sh test --quick INSIDE the VM
-worktree-vm tunnel ui       # surface the in-VM UI to a free host port (prints the URL)
-worktree-vm status          # VM status, containers, health, tunnels
-worktree-vm down            # stop the VM (keeps disk)
-worktree-vm destroy         # delete the VM
+```text
+/plugin marketplace add voycey/worktree-vm
+/plugin install worktree-vm@worktree-vm
 ```
 
-The VM/profile name is derived from the worktree directory (`worktree-vm name`).
-Each worktree gets its own VM automatically.
+…or, for a quick test without installing: `claude --plugin-dir ~/.worktree-vm`. Once enabled, the plugin's `bin/` is on `$PATH` automatically, the skill is model-invoked when you ask Claude to build/test a worktree in isolation, and `/worktree-vm <cmd>` is available as a slash command.
+
+## Quickstart
+
+From any worktree of a project that has a `worktree-vm.conf`:
+
+```sh
+worktree-vm up            # create VM, install toolchain, run CMD_UP, wait until healthy
+worktree-vm tunnel ui     # prints http://localhost:<port> → point your browser there
+worktree-vm test --quick  # run CMD_TEST --quick INSIDE the VM (localhost = the stack)
+worktree-vm status        # VM status, containers, health, open tunnels
+worktree-vm down          # stop the VM (keeps disk)
+worktree-vm destroy       # delete the VM entirely
+```
+
+Each worktree gets its **own** VM automatically (name derived from the worktree dir — see `worktree-vm name`). Run `up` in two worktrees and you have two fully isolated stacks at once.
 
 ## Configure
 
-Copy [`worktree-vm.example.conf`](./worktree-vm.example.conf) to your repo root as
-`worktree-vm.conf`. It is shell-sourced (`KEY="value"`). Key fields:
+Copy [`worktree-vm.example.conf`](./worktree-vm.example.conf) to your repo root as `worktree-vm.conf`. It is shell-sourced (`KEY="value"`) and trusted project code.
 
 | Key | Meaning |
 |---|---|
@@ -61,24 +84,68 @@ Copy [`worktree-vm.example.conf`](./worktree-vm.example.conf) to your repo root 
 | `PROVISION_SCRIPT` | shell to install anything apt can't (e.g. dotenvx) |
 | `PROVISION_SEED` | gitignored files copied from the main checkout into a fresh worktree |
 | `CMD_UP` / `CMD_TEST` | commands run **inside** the VM, cd'd to the worktree |
-| `HEALTH_URL` | polled inside the VM after `up` (gate for "ready") |
+| `HEALTH_URL` | polled inside the VM after `up` (the "ready" gate) |
 | `EXPOSE_UI` / `EXPOSE_API` | guest ports `tunnel` can surface to the host |
+
+<details>
+<summary>Example: a RAG stack driven by <code>./deploy.sh</code></summary>
+
+```sh
+VM_CPU=6; VM_MEMORY=16; VM_DISK=80
+VM_MOUNT="$HOME/github"
+PROVISION_APT="git jq curl ca-certificates"
+PROVISION_SCRIPT='command -v dotenvx >/dev/null 2>&1 || curl -sfS https://dotenvx.sh | sudo sh'
+PROVISION_SEED=".env.keys"
+CMD_UP="INSTANCE_NAME=local VERSION=local ./deploy.sh local"
+CMD_TEST="INSTANCE_NAME=local VERSION=local ./deploy.sh test"
+HEALTH_URL="http://127.0.0.1:38003/health"
+EXPOSE_UI=30001
+EXPOSE_API=38003
+```
+</details>
+
+## Commands
+
+| Command | Does |
+|---|---|
+| `provision` | Create/start the worktree's VM, install the toolchain, seed files |
+| `up` | `provision` + run `CMD_UP` inside the VM + wait for `HEALTH_URL` |
+| `test [args]` | Run `CMD_TEST [args]` inside the VM |
+| `tunnel [ui\|api\|<port>]` | SSH-forward an in-VM port to a free host port (prints the URL) |
+| `untunnel` | Close all tunnels for this worktree's VM |
+| `status` | VM status, containers, health, open tunnels |
+| `ssh [cmd]` | Shell into the VM (or run a command in the worktree dir) |
+| `down` / `destroy [-f]` | Stop (keep disk) / delete the VM |
+| `name` | Print the VM/profile name for this worktree |
 
 ## How it works
 
-- **Worktree → VM:** name derived from the worktree dir; `colima -p <name>`.
-- **Code into the VM:** Colima mounts `VM_MOUNT` writable at the same path, so the
-  worktree is visible inside the VM unchanged — no copy/sync.
-- **Deploy + test:** run inside the VM via `colima ssh`; `localhost` ports resolve
-  to the stack, so stock commands and tests Just Work.
-- **Browser on the host:** `tunnel` opens an SSH port-forward (`colima ssh-config`)
-  from a free host port to the in-VM UI; point your browser / Chrome DevTools there.
+- **Worktree → VM:** name derived from the worktree dir; one `colima -p <name>` profile each.
+- **Code into the VM:** Colima mounts `VM_MOUNT` writable at the same path, so the worktree is visible inside the VM unchanged — no copy/sync.
+- **Deploy + test:** run inside the VM via `colima ssh`; `localhost` ports resolve to the stack, so stock commands and tests Just Work.
+- **Browser on the host:** `tunnel` opens an SSH port-forward (from `colima ssh-config`) to the in-VM UI; point your browser / Chrome DevTools there.
 
 ## Caveats
 
-- **First `up` per VM is slow** (10–20 min) — it builds the project's images with no
-  cache shared between VMs. Subsequent runs reuse them.
+- **First `up` per VM is slow** (~10–20 min) — it builds the project's images with no cache shared between VMs. Subsequent runs reuse them.
 - **Disk:** images are duplicated per VM. Budget `VM_DISK` accordingly.
-- **RAM is the ceiling** on how many run at once (~2–3 heavy stacks on 64 GB).
-- macOS / Apple Silicon focused (`vz` + `virtiofs`). Use `VM_TYPE=qemu` /
-  `MOUNT_TYPE=sshfs` as a fallback.
+- **RAM is the ceiling** on how many run at once.
+- Some stacks abort the *very first* `up` on a fresh DB volume (a `depends_on: service_healthy` catching `initdb` mid-restart) — just re-run `up`.
+
+## Publishing your own plugin
+
+This repo is itself a Claude Code marketplace (`.claude-plugin/marketplace.json`). To distribute a plugin like it:
+
+1. Validate: `claude plugin validate .`
+2. Push to GitHub. Users add + install with:
+   ```text
+   /plugin marketplace add <owner>/<repo>
+   /plugin install <plugin>@<marketplace-name>
+   ```
+3. For broad discovery, open a PR to the officially-endorsed community marketplace [`anthropics/claude-plugins-community`](https://github.com/anthropics/claude-plugins-community) (auto-validated); users then `/plugin install <plugin>@claude-community`.
+
+Versioning: bump `version` in `plugin.json` and git-tag releases for pinned updates, or omit `version` to roll updates on every commit (git SHA).
+
+## License
+
+[MIT](./LICENSE) © Dan Voyce

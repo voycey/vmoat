@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "description": "One ephemeral Colima VM per git worktree: build and test multiple worktrees in parallel, each fully isolated in its own kernel + Docker daemon. Drives the project's stock build/test commands inside the VM.",
   "author": { "name": "Dan Voyce" },
-  "homepage": "https://github.com/loconsolutions/worktree-vm",
-  "keywords": ["colima", "vm", "worktree", "docker", "parallel-testing", "sandbox"]
+  "homepage": "https://github.com/voycey/worktree-vm",
+  "repository": "https://github.com/voycey/worktree-vm",
+  "license": "MIT",
+  "keywords": ["colima", "vm", "worktree", "docker", "parallel-testing", "sandbox", "isolation"]
 }
