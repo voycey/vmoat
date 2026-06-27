@@ -1,11 +1,4 @@
 # vmoat
-
-<p align="center">
-  <img src="docs/vmoat.jpeg" alt="A moat around every worktree" width="840">
-</p>
-
-**A moat around every git worktree.** One ephemeral [Colima](https://github.com/abiosoft/colima) VM per worktree, so you can build and test multiple worktrees of the same project **in parallel** — each sealed in its own Linux kernel + Docker daemon.
-
 [![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-D97757)](https://code.claude.com/docs/en/plugins)
 [![POSIX sh](https://img.shields.io/badge/POSIX-sh-4EAA25?logo=gnubash&logoColor=white)](./bin/vmoat)
 [![platforms](https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20WSL2-555?logo=linux&logoColor=white)](#requirements)
@@ -13,42 +6,21 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 [![version](https://img.shields.io/badge/version-0.1.0-blue)](./.claude-plugin/plugin.json)
 
+## A moat around every git worktree.
+
+One ephemeral [Colima](https://github.com/abiosoft/colima) VM per worktree, so you can build and test multiple worktrees of the same project **in parallel** — each sealed in its own Linux kernel + Docker daemon.
+
+Perfect for allowing Claude Code to perform end to end on multiple worktrees in parallel.
+<p align="center">
+  <img src="docs/vmoat.jpeg" alt="A moat around every worktree" width="840">
+</p>
+
+
 A `docker system prune`, an OOM, or a crashed stack in one worktree can **never** touch another worktree or your host. 
 
 The VM *is* the moat: inside it you run your project's **stock** commands (`./deploy.sh local`, `make up`, `docker compose up` …) with all defaults — no port-juggling, and **every existing test passes unmodified**, because inside the box `localhost` *is* the stack.
 
-<p align="center">
-  <img src="docs/01-isolation.svg" alt="A crash in one worktree's VM can't escape it — separate VM means separate kernel and daemon, so a prune/OOM/crash in one VM can't reach the others or the host." width="840">
-</p>
-
 Ships as **both a POSIX-sh CLI and a Claude Code plugin** (a skill + a `/vmoat` command), so a coding agent can spin up and test a worktree in isolation on its own. It is **project-agnostic**: everything specific to a repo lives in a small `vmoat.conf`.
-
----
-
-## Why a VM per worktree, not namespaced stacks on one daemon?
-
-Running N stacks on a single Docker daemon with different project names/ports works — until one worktree runs `docker system prune`, `down --volumes`, or blows up RAM/disk, and **every** stack dies with it. Separate VMs = separate daemons = **no shared blast radius**.
-
-The bonus is that each VM is a *separate host*, not a separate port. Inside every VM the stack owns the **default** ports, so `localhost:38003` *is* the stack and your tests need zero changes.
-
-<p align="center">
-  <img src="docs/02-parallel.svg" alt="Every worktree gets its own VM with its own hostname and Docker daemon, all running identical stock ports. It's a different host, not a different port." width="900">
-</p>
-
-Each worktree gets its **own** VM automatically (the name is derived from the worktree directory — see `vmoat name`). Run `up` in two worktrees and you have two fully isolated stacks at once, each addressable as its own host.
-
-## How it works
-
-<p align="center">
-  <img src="docs/03-howitworks.svg" alt="Five steps — worktree dir to its own Colima VM, mount code via virtiofs, run CMD_UP and wait for health, tunnel the UI to the host — then two ways to use it: open it in your browser, or have an agent drive it via Chrome DevTools." width="900">
-</p>
-
-- **Worktree → VM:** the name is derived from the worktree dir; one `colima -p <name>` profile each, with its own Docker context (`colima-<name>`).
-- **Code into the VM:** Colima mounts `VM_MOUNT` writable at the same path, so the worktree is visible inside the VM unchanged — no copy/sync.
-- **Deploy + test:** run inside the VM via `colima ssh`; `localhost` ports resolve to the stack, so stock commands and tests Just Work.
-- **Two ways to use it once it's up:**
-  - **You:** `vmoat tunnel` opens SSH port-forwards to the in-VM ports — point your browser there to see the live stack.
-  - **Your agent:** the Claude Code plugin lets a coding agent bring a worktree up, run its tests, and drive the tunnelled UI through **Chrome DevTools (MCP)** — hands-free, in isolation, in parallel with your other worktrees.
 
 ## Requirements
 
@@ -112,6 +84,36 @@ vmoat destroy       # delete the VM entirely
 ```
 
 Each worktree gets its **own** VM automatically (name derived from the worktree dir — see `vmoat name`). Run `up` in two worktrees and you have two fully isolated stacks at once.
+
+### Driven by Claude Code (the primary way)
+
+With the [Claude Code plugin](#as-a-claude-code-plugin) installed you rarely run these by hand. Just ask Claude to verify or test a branch — *"verify this worktree end-to-end"*, *"check the UI in the browser"* — and the **vmoat skill** takes over: it spins the worktree up in its own VM, runs the tests inside it, tunnels the app to your host, and drives **Chrome DevTools (MCP)** against it. Browser testing and independent verification run in the isolated VM **by default** — in parallel across worktrees, never on your host. The skill writes a `vmoat.conf` for the project automatically when one is needed.
+
+
+## Why a VM per worktree, not namespaced stacks on one daemon?
+
+Running N stacks on a single Docker daemon with different project names/ports works — until one worktree runs `docker system prune`, `down --volumes`, or blows up RAM/disk, and **every** stack dies with it. Separate VMs = separate daemons = **no shared blast radius**.
+
+The bonus is that each VM is a *separate host*, not a separate port. Inside every VM the stack owns the **default** ports, so `localhost:38003` *is* the stack and your tests need zero changes.
+
+<p align="center">
+  <img src="docs/02-parallel.svg" alt="Every worktree gets its own VM with its own hostname and Docker daemon, all running identical stock ports. It's a different host, not a different port." width="900">
+</p>
+
+Each worktree gets its **own** VM automatically (the name is derived from the worktree directory — see `vmoat name`). Run `up` in two worktrees and you have two fully isolated stacks at once, each addressable as its own host.
+
+## How it works
+
+<p align="center">
+  <img src="docs/03-howitworks.svg" alt="Five steps — worktree dir to its own Colima VM, mount code via virtiofs, run CMD_UP and wait for health, tunnel the UI to the host — then two ways to use it: open it in your browser, or have an agent drive it via Chrome DevTools." width="900">
+</p>
+
+- **Worktree → VM:** the name is derived from the worktree dir; one `colima -p <name>` profile each, with its own Docker context (`colima-<name>`).
+- **Code into the VM:** Colima mounts `VM_MOUNT` writable at the same path, so the worktree is visible inside the VM unchanged — no copy/sync.
+- **Deploy + test:** run inside the VM via `colima ssh`; `localhost` ports resolve to the stack, so stock commands and tests Just Work.
+- **Two ways to use it once it's up:**
+  - **You:** `vmoat tunnel` opens SSH port-forwards to the in-VM ports — point your browser there to see the live stack.
+  - **Your agent:** the Claude Code plugin lets a coding agent bring a worktree up, run its tests, and drive the tunnelled UI through **Chrome DevTools (MCP)** — hands-free, in isolation, in parallel with your other worktrees.
 
 ## Configure — optional
 

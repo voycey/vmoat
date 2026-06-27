@@ -1,6 +1,6 @@
 ---
 name: vmoat
-description: Build, deploy, and test a git worktree in its own isolated Colima VM, so multiple worktrees can be worked on in parallel without their Docker stacks colliding. Use when the user wants to run/test/verify a worktree's stack in isolation, deploy a worktree to its own VM, test changes in parallel with other worktrees, or when running the project's stack on the shared host Docker daemon would clobber another worktree. Requires a vmoat.conf at the repo root and `colima` installed.
+description: Build, run, test, and VERIFY a git worktree in its own isolated Colima VM. This is the DEFAULT way to verify a change actually works end-to-end — use it WHENEVER you are about to do browser testing, drive Chrome DevTools (MCP), run UI / integration / end-to-end tests, take a screenshot of a running app, or otherwise independently confirm a worktree's app works. Instead of starting the stack on the host, vmoat brings the worktree up in an isolated VM and tunnels it to the host, so verification never collides with the host or other worktrees and runs in parallel across worktrees. Also use to run/test a worktree's stack in isolation, or when running the project's stack on the shared host Docker daemon would clobber another worktree. Config is optional (auto-detected for standard projects); requires `colima` installed.
 ---
 
 # vmoat: per-worktree isolated VM build & test
