@@ -19,8 +19,12 @@ operates on the **current** git worktree.
 1. `command -v colima` — if missing, tell the user to install it (macOS/Linux:
    `brew install colima docker`; Windows: inside WSL2 with nested virtualization
    enabled). A one-time setup; do not install it silently — it's a heavy dependency.
-2. A `vmoat.conf` exists at the repo root (`git rev-parse --show-toplevel`).
-   If not, copy `vmoat.example.conf` and fill in `CMD_UP`/`CMD_TEST`/`HEALTH_URL`.
+2. `vmoat.conf` is **optional**. For a standard project vmoat auto-detects the
+   start command (compose / Makefile `up:` / `package.json` `dev`) and auto-discovers
+   ports — just `vmoat up`. Only if `up` reports it can't detect how to start the
+   project, run `vmoat init` (scaffolds a `vmoat.conf`) or set `CMD_UP` (and
+   `CMD_TEST` if you'll run `vmoat test`). A per-worktree `vmoat.local.conf`
+   (gitignored) overrides any key for one worktree.
 3. Resources: the first `up` spins a multi-GB VM and **builds the project's images
    inside it (10–20 min)**. Confirm with the user before provisioning if other heavy
    work (ingest, builds, other VMs) may be running — it competes for RAM/CPU.

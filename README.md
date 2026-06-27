@@ -86,11 +86,11 @@ ln -s ~/.vmoat/bin/vmoat /usr/local/bin/vmoat   # or ~/.local/bin
 
 ## Quickstart
 
-From any worktree of a project that has a `vmoat.conf`:
+From any worktree — **no config needed** for a standard project:
 
 ```sh
-vmoat up            # create VM, install toolchain, run CMD_UP, wait until healthy
-vmoat tunnel        # forward every EXPOSE_PORTS to the host (prints each URL)
+vmoat up            # create the VM + start the stack (auto-detected if no config)
+vmoat tunnel        # forward the stack's published ports to the host (prints each URL)
 vmoat test --quick  # run CMD_TEST --quick INSIDE the VM (localhost = the stack)
 vmoat status        # VM status, containers, health, open tunnels
 vmoat down          # stop the VM (keeps disk)
@@ -99,9 +99,18 @@ vmoat destroy       # delete the VM entirely
 
 Each worktree gets its **own** VM automatically (name derived from the worktree dir — see `vmoat name`). Run `up` in two worktrees and you have two fully isolated stacks at once.
 
-## Configure
+## Configure — optional
 
-Copy [`vmoat.example.conf`](./vmoat.example.conf) to your repo root as `vmoat.conf`. It is shell-sourced (`KEY="value"`) and trusted project code. **The only required setting is `CMD_UP`** — everything else is optional, so vmoat stays general-purpose (no assumptions about your stack, secrets tooling, or health endpoints).
+**vmoat.conf is optional.** For a standard project, vmoat needs no config: it
+**auto-detects how to start the stack** (a `docker compose` file → `docker compose up -d`;
+a `Makefile` with an `up:` target → `make up`; a `package.json` `dev` script → `npm run dev`)
+and **auto-discovers the ports to tunnel** from the running containers. So `vmoat up`
+then `vmoat tunnel` Just Work with zero setup.
+
+Add a `vmoat.conf` (or run **`vmoat init`** to scaffold one) only to *customize* — a
+non-standard start command, a test command, provisioning, a health gate, or to pin
+specific ports. It is shell-sourced (`KEY="value"`), trusted project code, and **only
+`CMD_UP` is required** — which is itself auto-detected for standard layouts.
 
 | Key | Req | Meaning |
 |---|---|---|
@@ -148,10 +157,11 @@ EXPOSE_PORTS=(30001 38003)
 
 | Command | Does |
 |---|---|
-| `provision` | Create/start the worktree's VM, install the toolchain, seed files |
-| `up` | `provision` + run `CMD_UP` inside the VM (+ wait for `HEALTH_URL` if set) |
+| `init` | Scaffold a `vmoat.conf` (optional — `CMD_UP` is auto-detected otherwise) |
+| `up` | `provision` + run `CMD_UP` (auto-detected if unset) inside the VM (+ wait for `HEALTH_URL` if set) |
 | `test [args]` | Run `CMD_TEST [args]` inside the VM |
-| `tunnel [port…]` | SSH-forward in-VM port(s) to free host ports (default: every `EXPOSE_PORTS`) |
+| `tunnel [port…]` | SSH-forward in-VM port(s) to free host ports (default: `EXPOSE_PORTS`, else auto-discovered) |
+| `provision` | Create/start the worktree's VM, install the toolchain, seed files |
 | `untunnel` | Close all tunnels for this worktree's VM |
 | `status` | VM status, containers, health, open tunnels |
 | `ssh [cmd]` | Shell into the VM (or run a command in the worktree dir) |

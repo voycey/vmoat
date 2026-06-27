@@ -26,18 +26,19 @@ usage() {
 vmoat -- one ephemeral Colima VM per git worktree.
 
 Commands (operate on the CURRENT git worktree):
-  provision     Create/start the worktree's VM; install toolchain; seed files.
-  up            provision + run CMD_UP inside the VM (+ wait for health if set).
+  init          Scaffold a vmoat.conf (optional; CMD_UP is auto-detected).
+  up            run CMD_UP inside the VM (+ wait for health if set).
   test [args]   Run CMD_TEST [args] inside the VM (localhost = the stack).
-  tunnel [port] Forward in-VM port(s) to the host (default: every EXPOSE_PORTS).
+  tunnel [port] Forward in-VM port(s) to the host (default: discovered ports).
   untunnel      Close all tunnels for this worktree's VM.
   status        Show VM status, containers, health, and open tunnels.
+  provision     Create/start the worktree's VM; install toolchain; seed files.
   ssh [cmd]     Shell into the VM (or run a command in the worktree dir).
   down          Stop the VM (keeps disk).
   destroy [-f]  Delete the VM entirely.
   name          Print the VM/profile name for this worktree.
 
-Config: <repo-root>/vmoat.conf (copy vmoat.example.conf).
+Config: <repo-root>/vmoat.conf is OPTIONAL (copy vmoat.example.conf to customize).
 EOF
 }
 
@@ -54,6 +55,7 @@ main() {
   VM=$(vm_name)
 
   case "$cmd" in
+    init)      cmd_init ;;
     provision) cmd_provision ;;
     up)        cmd_up ;;
     test)      cmd_test "$@" ;;

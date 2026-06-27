@@ -73,11 +73,11 @@ EXPOSE_PORTS=()
 
 load_config() {
   WTVM_CONFIG="$REPO_ROOT/vmoat.conf"
+  # vmoat.conf is OPTIONAL — for a standard project, CMD_UP is auto-detected and
+  # ports are auto-discovered (see commands.sh). Only write a config to customize.
   if [ -f "$WTVM_CONFIG" ]; then
     # shellcheck disable=SC1090
     . "$WTVM_CONFIG"
-  else
-    warn "No vmoat.conf at $REPO_ROOT -- using defaults. Copy vmoat.example.conf to get started."
   fi
   # Per-worktree override. vmoat.local.conf is gitignored, so it exists only in
   # THIS worktree's directory -- sourced last, it wins. Use it to give one
