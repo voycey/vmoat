@@ -1,0 +1,86 @@
+name: release
+
+# On a v* tag push: compute the release tarball sha256, update the Homebrew
+# formula, push it to the tap (voycey/homebrew-vmoat), and cut a GitHub Release.
+# Pre-tag version bump is done by scripts/release.sh.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)publish, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: write # create the GitHub Release + sync the formula sha back to main
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag
+        id: t
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Compute release tarball sha256
+        id: sha
+        env:
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.t.outputs.tag }}
+        run: |
+          url="https://github.com/${REPO}/archive/refs/tags/${TAG}.tar.gz"
+          sha=$(curl -fsSL "$url" | sha256sum | awk '{print $1}')
+          [ -n "$sha" ] || { echo "could not fetch/hash $url"; exit 1; }
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Render formula (url + sha)
+        env:
+          V: ${{ steps.t.outputs.version }}
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          sed -i -E "s#archive/refs/tags/v[0-9][0-9.]*\.tar\.gz#archive/refs/tags/v${V}.tar.gz#" packaging/vmoat.rb
+          sed -i -E "s/^  sha256 \".*\"/  sha256 \"${SHA}\"/" packaging/vmoat.rb
+          echo '----- packaging/vmoat.rb -----'; cat packaging/vmoat.rb
+
+      - name: Sync formula sha back to main
+        run: |
+          if ! git diff --quiet packaging/vmoat.rb; then
+            git config user.name  'github-actions[bot]'
+            git config user.email 'github-actions[bot]@users.noreply.github.com'
+            git commit -am "chore: sync formula sha for ${{ steps.t.outputs.tag }} [skip ci]"
+            git push origin HEAD:main
+          fi
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.TAP_DEPLOY_KEY }}
+
+      - name: Publish formula to the Homebrew tap
+        run: |
+          tmp="$(mktemp -d)"
+          git clone git@github.com:voycey/homebrew-vmoat.git "$tmp"
+          mkdir -p "$tmp/Formula"
+          cp packaging/vmoat.rb "$tmp/Formula/vmoat.rb"
+          cd "$tmp"
+          if git diff --quiet; then
+            echo "tap already up to date for ${{ steps.t.outputs.tag }}"
+          else
+            git config user.name  'github-actions[bot]'
+            git config user.email 'github-actions[bot]@users.noreply.github.com'
+            git commit -am "vmoat ${{ steps.t.outputs.tag }}"
+            git push
+          fi
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ steps.t.outputs.tag }}" --title "vmoat ${{ steps.t.outputs.tag }}" --generate-notes || true

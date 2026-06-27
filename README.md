@@ -1,7 +1,9 @@
 # vmoat
+
 <p align="center">
   <img src="docs/vmoat.jpeg" alt="A moat around every worktree" width="840">
-</p> 
+</p>
+
 **A moat around every git worktree.** One ephemeral [Colima](https://github.com/abiosoft/colima) VM per worktree, so you can build and test multiple worktrees of the same project **in parallel** — each sealed in its own Linux kernel + Docker daemon.
 
 [![Claude Code plugin](https://img.shields.io/badge/Claude_Code-plugin-D97757)](https://code.claude.com/docs/en/plugins)

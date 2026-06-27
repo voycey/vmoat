@@ -1,40 +1,40 @@
 # Releasing vmoat (Homebrew tap)
 
-vmoat is distributed via a personal tap, so users install with one command:
+vmoat installs with one command via a personal tap:
 
 ```sh
 brew install voycey/vmoat/vmoat
 ```
 
-That resolves to the tap repo **`voycey/homebrew-vmoat`** (a repo named
-`homebrew-<tap>` is required by Homebrew), which holds `Formula/vmoat.rb`.
-The canonical formula lives here at [`packaging/vmoat.rb`](./vmoat.rb).
+That resolves to the tap repo **`voycey/homebrew-vmoat`** (Homebrew requires a
+`homebrew-<tap>` repo name), which holds `Formula/vmoat.rb`. The canonical formula
+lives here at [`vmoat.rb`](./vmoat.rb).
 
-## Cut a release
+## Cutting a release — one command
 
 ```sh
-# 1. tag + push the version
-git tag -a v0.1.0 -m "vmoat v0.1.0"
-git push origin v0.1.0
-
-# 2. compute the tarball checksum
-sha=$(curl -fsSL https://github.com/voycey/vmoat/archive/refs/tags/v0.1.0.tar.gz | shasum -a 256 | awk '{print $1}')
-echo "$sha"
-
-# 3. update packaging/vmoat.rb: set `url` to the new tag and `sha256` to $sha,
-#    and bump WTVM_VERSION in bin/vmoat to match.
-
-# 4. publish to the tap (first time: create the repo)
-gh repo create voycey/homebrew-vmoat --public -d "Homebrew tap for vmoat" || true
-tap=$(mktemp -d)
-gh repo clone voycey/homebrew-vmoat "$tap"
-mkdir -p "$tap/Formula"
-cp packaging/vmoat.rb "$tap/Formula/vmoat.rb"
-git -C "$tap" add Formula/vmoat.rb
-git -C "$tap" commit -m "vmoat v0.1.0"
-git -C "$tap" push
+scripts/release.sh 0.2.0
 ```
 
-Then `brew install voycey/vmoat/vmoat` works (or `brew install --HEAD voycey/vmoat/vmoat`
-before a tag exists). Future versions: repeat steps 1–4, or wire a GitHub Action
-(`dawidd6/action-homebrew-bump-formula`) to auto-bump the tap on each tag.
+That bumps the embedded version (`WTVM_VERSION` in `bin/vmoat` + the formula URL),
+commits, tags `v0.2.0`, and pushes. The **`release` GitHub Action**
+(`.github/workflows/release.yml`) then, on the tag push:
+
+1. computes the release tarball's `sha256`,
+2. writes the updated `url` + `sha256` into the formula and syncs it back to `main`,
+3. pushes `Formula/vmoat.rb` to the tap repo,
+4. creates the GitHub Release.
+
+`brew upgrade vmoat` then picks it up. You can re-run the publish for an existing
+tag from the Actions tab (workflow_dispatch → enter the tag).
+
+## One-time CI setup (already done)
+
+Cross-repo push to the tap uses a **scoped deploy key** (least privilege — no broad PAT):
+
+- an `ed25519` **write deploy key** on `voycey/homebrew-vmoat`, and
+- its private half stored as the **`TAP_DEPLOY_KEY`** Actions secret on `voycey/vmoat`.
+
+To rotate: `ssh-keygen -t ed25519 -f key -N ""`, then
+`gh repo deploy-key add key.pub --repo voycey/homebrew-vmoat --allow-write` and
+`gh secret set TAP_DEPLOY_KEY --repo voycey/vmoat < key`.
