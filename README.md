@@ -72,6 +72,12 @@ ln -s ~/.vmoat/bin/vmoat /usr/local/bin/vmoat   # or ~/.local/bin
 
 ## Quickstart
 
+### Driven by Claude Code (the primary way)
+
+With the [Claude Code plugin](#as-a-claude-code-plugin) installed you rarely run these by hand. Just ask Claude to verify or test a branch — *"verify this worktree end-to-end"*, *"check the UI in the browser"* — and the **vmoat skill** takes over: it spins the worktree up in its own VM, runs the tests inside it, tunnels the app to your host, and drives **Chrome DevTools (MCP)** against it. Browser testing and independent verification run in the isolated VM **by default** — in parallel across worktrees, never on your host. The skill writes a `vmoat.conf` for the project automatically when one is needed.
+
+### Or manually: 
+
 From any worktree — **no config needed** for a standard project:
 
 ```sh
@@ -84,10 +90,6 @@ vmoat destroy       # delete the VM entirely
 ```
 
 Each worktree gets its **own** VM automatically (name derived from the worktree dir — see `vmoat name`). Run `up` in two worktrees and you have two fully isolated stacks at once.
-
-### Driven by Claude Code (the primary way)
-
-With the [Claude Code plugin](#as-a-claude-code-plugin) installed you rarely run these by hand. Just ask Claude to verify or test a branch — *"verify this worktree end-to-end"*, *"check the UI in the browser"* — and the **vmoat skill** takes over: it spins the worktree up in its own VM, runs the tests inside it, tunnels the app to your host, and drives **Chrome DevTools (MCP)** against it. Browser testing and independent verification run in the isolated VM **by default** — in parallel across worktrees, never on your host. The skill writes a `vmoat.conf` for the project automatically when one is needed.
 
 
 ## Why a VM per worktree, not namespaced stacks on one daemon?
