@@ -11,8 +11,19 @@ Inside it you run the project's **stock** commands (e.g. `./deploy.sh local`,
 no port-juggling and every test passes unmodified. A `docker prune`/OOM/crash in one
 worktree's VM cannot touch another worktree or the host.
 
-The CLI is `vmoat` (on PATH, or `bin/vmoat` in this plugin). It always
-operates on the **current** git worktree.
+**Which CLI to run:** this plugin's own `bin/vmoat` (two directories above this
+skill's base directory), so the CLI matches this skill. Use a `vmoat` on PATH only
+if `vmoat version` reports 0.2.0 or newer: an older one (e.g. a Homebrew 0.1.0)
+has no memory reclaim or base images. It always operates on the **current** git
+worktree.
+
+**Defaults to use** (each is explained below):
+- `vmoat ls` before bringing anything up.
+- `vmoat up --reclaim=auto`: memory goes back to macOS while the VM runs, wherever
+  that's available; elsewhere it's a standard VM.
+- Base images happen on their own: a new worktree's VM clones the repo's base image
+  in seconds, and the first from-scratch build is saved as that base automatically.
+- `vmoat down` when verification is done.
 
 ## Preconditions (check first)
 
@@ -23,9 +34,20 @@ operates on the **current** git worktree.
    missing, **Step 0 below** has you author one from the project — do that before
    `up` unless it's a plain `docker compose` project that needs no provisioning. A
    per-worktree `vmoat.local.conf` (gitignored) overrides any key for one worktree.
-3. Resources: the first `up` spins a multi-GB VM and **builds the project's images
-   inside it (10–20 min)**. Confirm with the user before provisioning if other heavy
-   work (ingest, builds, other VMs) may be running — it competes for RAM/CPU.
+3. Resources: run **`vmoat ls`** first. It lists every vmoat VM on the host and the
+   host RAM each running one holds. A standard macOS VM holds on to nearly its full
+   `VM_MEMORY` until it's stopped; a reclaim VM (`--reclaim`) gives freed memory back.
+   If `up` warns that it goes over the memory budget, tell the user which VMs hold
+   the most RAM and **ask** before parking any of them with `vmoat down <vm>` (other
+   worktrees' VMs may be in use).
+4. Memory reclaim needs a one-time build of its VM runtime
+   (`scripts/build-krunkit.sh` in this plugin, ~25 s with Rust installed). Until it
+   exists, `--reclaim=auto` quietly creates standard VMs. If `vmoat ls` shows the
+   machine is short of RAM and it isn't built yet, suggest it to the user and ask
+   before running it (it compiles from source).
+5. Time: a repo's very first `up` builds its images (10–20 min for a heavy stack)
+   and is then saved as the base image (about a minute more, with one VM restart).
+   Every later worktree clones that base and is up in well under a minute.
 
 ## Workflow
 
@@ -76,7 +98,15 @@ until it goes healthy or fails:
   count / health), breaking when the task exits or `status` shows the health URL OK.
 
 This catches a stuck build or a dead VM instead of leaving the user staring at a
-blank wait. Do not declare success until the health gate passes.
+blank wait. Use `vmoat up --reclaim=auto` (the flags only matter when the VM is
+created). If `up` logs "Cloning VM ... from base image", it's a copy-on-write clone
+and will be ready in seconds. On a repo's first from-scratch build, `up` saves the
+VM as the base image by itself ("First build of this repo: saving it as the base
+image") and brings the stack back up; that's expected, not an error. Use
+`vmoat up --fresh` only when the user asks for a clean build, or when the base
+image is clearly stale or broken (then refresh it with `vmoat base save` and say so).
+
+Do not declare success until the health gate passes.
 
 ### 3. Run tests INSIDE the VM
 ```
@@ -98,11 +128,18 @@ vmoat untunnel
 ```
 Tunnel a specific port if needed: `vmoat tunnel <port>` (e.g. an API port for a host-side check).
 
-### 5. Leave it running; report
-Do **not** tear down by default. Report to the user:
-- the tunnel URL(s) and how to reach the stack,
-- `vmoat test …` to re-run tests,
-- `vmoat down` (stop, keep disk) / `vmoat destroy` (remove) for teardown.
+### 5. Stop it when you're done; report
+A running VM holds its RAM until it stops, so **run `vmoat down` once verification
+is finished** (it runs `untunnel` too). Leave it running only if the user asked to
+look at the stack themselves or to keep it up, and then say it's still holding RAM.
+`down` keeps the disk, images and volumes; `vmoat up` brings it back in under a
+minute plus `CMD_UP`. Report to the user:
+- what you verified, and whether the VM is stopped or still running (with tunnel URLs),
+- `vmoat up` to resume, `vmoat test …` to re-run tests, `vmoat destroy` to remove it.
+
+`vmoat reap` stops every vmoat VM that has gone unused (no vmoat command, attached
+session, tunnel connection or guest load) for `REAP_IDLE_MIN` minutes. It's the
+user's safety net for VMs that sessions left running, not part of this workflow.
 
 ## Isolation guarantee (state it when relevant)
 Anything destructive inside one VM — `docker system prune`, `down --volumes`, an OOM

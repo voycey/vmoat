@@ -48,10 +48,15 @@ VM_CPU=4
 VM_MEMORY=8
 VM_DISK=60
 # VM backend defaults are PLATFORM-AWARE (override either in vmoat.conf):
-#   macOS      -> vz + virtiofs (Virtualization.framework, fast; macOS 13+)
+#   macOS 13+  -> vz + virtiofs (Apple's Virtualization.framework, fast)
+#   macOS <13  -> qemu + sshfs  (Virtualization.framework vz needs macOS 13)
 #   Linux/WSL2 -> empty -> let Colima pick its native backend (qemu + KVM)
 if [ "$WTVM_PLATFORM" = "darwin" ]; then
-  VM_TYPE="vz"; MOUNT_TYPE="virtiofs"
+  if [ "$(sw_vers -productVersion 2>/dev/null | cut -d. -f1)" -ge 13 ] 2>/dev/null; then
+    VM_TYPE="vz"; MOUNT_TYPE="virtiofs"
+  else
+    VM_TYPE="qemu"; MOUNT_TYPE="sshfs"
+  fi
 else
   VM_TYPE=""; MOUNT_TYPE=""
 fi
@@ -71,6 +76,26 @@ HEALTH_TIMEOUT=1800   # seconds to wait for health (first build can be 10-20 min
 # space-separated string both work, e.g. EXPOSE_PORTS=(30001 38003).
 EXPOSE_PORTS=()
 
+# `vmoat reap` stops a VM only after this many minutes with no vmoat command,
+# no open tunnel connection, and a guest 5-min load average under REAP_LOAD.
+REAP_IDLE_MIN=60
+REAP_LOAD=1.0
+
+# MEMORY_RECLAIM=1: create VMs on Colima's krunkit backend with a krunkit whose
+# balloon hands memory the guest frees back to macOS while the VM runs (built by
+# scripts/build-krunkit.sh into KRUNKIT_HOME), plus a guest timer that drops page
+# cache every RECLAIM_INTERVAL minutes so cached memory is freed and returned too.
+MEMORY_RECLAIM=0
+RECLAIM_INTERVAL=5
+
+# Base image a new worktree's VM is cloned from (copy-on-write), if it exists.
+# Empty = the main checkout's directory name. `vmoat base save` creates it.
+BASE_IMAGE=""
+# After the first from-scratch `up` of a repo (no base image yet), save the VM
+# as the base automatically so every later worktree clones it. 0 = don't.
+AUTO_BASE=1
+KRUNKIT_HOME="${KRUNKIT_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/vmoat/krunkit}"
+
 load_config() {
   WTVM_CONFIG="$REPO_ROOT/vmoat.conf"
   # vmoat.conf is OPTIONAL — for a standard project, CMD_UP is auto-detected and
@@ -87,6 +112,32 @@ load_config() {
     # shellcheck disable=SC1090
     . "$REPO_ROOT/vmoat.local.conf"
   fi
+  [ -n "${VMOAT_RECLAIM_FLAG:-}" ] && MEMORY_RECLAIM="$VMOAT_RECLAIM_FLAG"   # `up --reclaim[=auto]`
+  # auto: reclaim when it's available here (Apple Silicon + the built krunkit).
+  if [ "$MEMORY_RECLAIM" = auto ]; then
+    if [ "$WTVM_PLATFORM" = "darwin" ] && [ "$(uname -m)" = arm64 ] && [ -f "$KRUNKIT_HOME/VMOAT_RECLAIM" ]; then
+      MEMORY_RECLAIM=1
+    else
+      MEMORY_RECLAIM=0
+    fi
+  fi
+  # A committed MEMORY_RECLAIM=1 must not break teammates on Linux/WSL2/Intel.
+  if [ "$MEMORY_RECLAIM" = 1 ]; then
+    if [ "$WTVM_PLATFORM" = "darwin" ] && [ "$(uname -m)" = arm64 ]; then
+      VM_TYPE="krunkit"; MOUNT_TYPE="virtiofs"
+    else
+      warn "MEMORY_RECLAIM=1 ignored: it needs macOS on Apple Silicon (Colima's krunkit backend)."
+      MEMORY_RECLAIM=0
+    fi
+  fi
+}
+
+# Put the reclaiming krunkit first on PATH: Lima's krunkit driver launches
+# `krunkit` from PATH whenever the VM starts, not only when it's created.
+use_reclaim_krunkit() {
+  [ -x "$KRUNKIT_HOME/bin/krunkit" ] && [ -f "$KRUNKIT_HOME/VMOAT_RECLAIM" ] \
+    || die "No memory-reclaiming krunkit in $KRUNKIT_HOME. Build it once with: $(cd "$SELF_DIR/.." && pwd)/scripts/build-krunkit.sh"
+  case ":$PATH:" in *":$KRUNKIT_HOME/bin:"*) ;; *) PATH="$KRUNKIT_HOME/bin:$PATH"; export PATH ;; esac
 }
 
 # ---------------------------------------------------------------------------
@@ -107,15 +158,27 @@ resolve_repo() {
   MAIN_WORKTREE=$(cd "$(dirname "$cdir")" && pwd)
 }
 
-# sanitised, stable VM/profile name derived from the worktree directory name.
-vm_name() {
-  local base
-  base=$(basename "$REPO_ROOT")
-  base=$(printf '%s' "$base" \
+# lowercase a-z0-9- only, as Colima profile names need.
+_sanitize() {
+  printf '%s' "$1" \
     | tr '[:upper:]' '[:lower:]' \
     | tr -c 'a-z0-9-' '-' \
-    | sed -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')
-  printf '%s%s' "$VM_PREFIX" "$base"
+    | sed -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
+}
+
+# sanitised, stable VM/profile name derived from the worktree directory name.
+vm_name() {
+  printf '%s%s' "$VM_PREFIX" "$(_sanitize "$(basename "$REPO_ROOT")")"
+}
+
+# Base images are Colima profiles named vmoat-base-<name>: outside VM_PREFIX, so
+# `ls`, `reap` and `down <vm>` never touch them.
+base_name() { _sanitize "${1:-${BASE_IMAGE:-$(basename "$MAIN_WORKTREE")}}"; }
+# One base per backend: a reclaim (krunkit) VM can only clone a reclaim base.
+base_profile() {
+  printf 'vmoat-base-%s' "$(base_name "${1:-}")"
+  [ "${2:-}" = "krunkit" ] && printf -- '-reclaim'
+  return 0
 }
 
 # assert the worktree is reachable inside the VM via the writable mount.
@@ -136,6 +199,79 @@ vm_running() {
   [ "$(colima list 2>/dev/null | awk -v p="$VM" 'NR>1 && $1==p {print tolower($2)}')" = "running" ]
 }
 
+# Backend an existing profile was created with. Colima keeps it for the life of
+# the profile -- `colima start -p` ignores --vm-type on an existing VM.
+vm_backend() {
+  awk '/^vmType:/{print $2; exit}' "${COLIMA_HOME:-$HOME/.colima}/$1/colima.yaml" 2>/dev/null
+}
+
+# One line per Colima profile: <name> <status> <cpus> <memory-GiB>. Parsed from
+# `colima list --json` (one object per line) so the size is exact, not "24GiB".
+colima_profiles() {
+  colima list --json 2>/dev/null | sed -n \
+    's/.*"name":"\([^"]*\)".*"status":"\([^"]*\)".*"cpus":\([0-9]*\).*"memory":\([0-9]*\).*/\1 \2 \3 \4/p' \
+    | awk '{printf "%s %s %s %d\n", $1, tolower($2), $3, $4 / 1073741824}'
+}
+
+host_ram_gb() {
+  if [ "$WTVM_PLATFORM" = "darwin" ]; then
+    printf '%s' $(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1073741824 ))
+  elif [ -r /proc/meminfo ]; then
+    awk '/^MemTotal:/{printf "%d", $2 / 1048576}' /proc/meminfo 2>/dev/null
+  else
+    printf '0'
+  fi
+}
+
+# Host RAM a running VM actually holds, in GiB (one decimal), or "-" if unknown.
+# On macOS/vz the guest's RAM lives in Apple's com.apple.Virtualization.VirtualMachine
+# XPC process (not limactl), found by the profile's disk it holds open.
+# "<pid> <profile>" for every running vz/krunkit VM, computed once per invocation (lsof
+# is slow). Captured into variables, not piped to `grep -q`: under pipefail the
+# early exit SIGPIPEs lsof and fails the match.
+_VZ_PIDS=""; _VZ_PIDS_DONE=""
+_vz_pids() {
+  if [ -z "$_VZ_PIDS_DONE" ]; then
+    local pid files prof
+    for pid in $(pgrep -f com.apple.Virtualization.VirtualMachine 2>/dev/null || true) \
+               $(pgrep -x krunkit 2>/dev/null || true); do
+      files=$(lsof -p "$pid" -Fn 2>/dev/null || true)
+      prof=$(printf '%s\n' "$files" | sed -n 's|.*/_lima/colima-\([^/]*\)/.*|\1|p' | head -1)
+      [ -n "$prof" ] && _VZ_PIDS="$_VZ_PIDS$pid $prof
+"
+    done
+    _VZ_PIDS_DONE=1
+  fi
+  printf '%s' "$_VZ_PIDS"
+}
+
+vm_host_footprint() {
+  local profile="$1" pid kb
+  if [ "$WTVM_PLATFORM" = "darwin" ]; then
+    for pid in $(_vz_pids | awk -v p="$profile" '$2 == p {print $1}'); do
+      # vz: phys_footprint (what Activity Monitor shows). krunkit maps guest RAM
+      # through Hypervisor.framework, which `footprint` undercounts: use RSS.
+      case "$(ps -o comm= -p "$pid" 2>/dev/null)" in *krunkit) false ;; *) true ;; esac \
+        && footprint -p "$pid" 2>/dev/null | awk '
+        /Footprint:/ { for (i = 1; i <= NF; i++) if ($i == "Footprint:") {
+          v = $(i+1); u = $(i+2)
+          if (u == "KB") v /= 1048576; else if (u == "MB") v /= 1024; else if (u == "B") v /= 1073741824
+          printf "%.1f\n", v; found = 1; exit } }
+        END { if (!found) exit 1 }' && return 0
+      kb=$(ps -o rss= -p "$pid" 2>/dev/null | tr -d ' ')
+      [ -n "$kb" ] && { awk -v k="$kb" 'BEGIN{printf "%.1f\n", k / 1048576}'; return 0; }
+    done
+  else
+    # qemu: the guest's RAM is the qemu process for this profile.
+    pid=$(pgrep -f "qemu-system.*colima-$profile" 2>/dev/null | head -1 || true)
+    if [ -n "$pid" ]; then
+      kb=$(ps -o rss= -p "$pid" 2>/dev/null | tr -d ' ')
+      [ -n "$kb" ] && { awk -v k="$kb" 'BEGIN{printf "%.1f\n", k / 1048576}'; return 0; }
+    fi
+  fi
+  printf -- '-\n'
+}
+
 # run a command string inside the VM, cd'd to the worktree path. streams output.
 in_vm() {
   colima ssh -p "$VM" -- bash -lc "cd $(_q "$REPO_ROOT") && $1"
@@ -151,6 +287,12 @@ in_vm_q() {
 runtime_dir() {
   RUNDIR="${XDG_RUNTIME_DIR:-$HOME/.cache/vmoat}/$VM"
   mkdir -p "$RUNDIR"
+}
+
+# Stamp the VM as in use now; `vmoat reap` measures idleness from this.
+touch_last_used() {
+  runtime_dir
+  date +%s > "$RUNDIR/last-used"
 }
 
 _port_in_use() {
