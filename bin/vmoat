@@ -27,14 +27,27 @@ vmoat -- one ephemeral Colima VM per git worktree.
 
 Commands (operate on the CURRENT git worktree):
   init          Scaffold a vmoat.conf (optional; CMD_UP is auto-detected).
-  up            run CMD_UP inside the VM (+ wait for health if set).
+  up [--reclaim[=auto]] [--fresh]
+                Run CMD_UP inside the VM (+ wait for health if set). A new VM is
+                cloned from this repo's base image if there is one (--fresh: build
+                from scratch); the first build is saved as that base (AUTO_BASE).
+                --reclaim creates it so it gives freed memory back to macOS while
+                it runs (MEMORY_RECLAIM=1; scripts/build-krunkit.sh); =auto does so
+                only where that's available.
+  base save [name] | ls | rm <name>
+                Snapshot this worktree's VM as a copy-on-write base image that new
+                worktrees' VMs clone in under a second (macOS).
   test [args]   Run CMD_TEST [args] inside the VM (localhost = the stack).
   tunnel [port] Forward in-VM port(s) to the host (default: discovered ports).
   untunnel      Close all tunnels for this worktree's VM.
   status        Show VM status, containers, health, and open tunnels.
+  ls            List every vmoat VM on this host and the host RAM each holds.
+  reap [--idle MIN] [--dry-run] [--install-agent]
+                Stop every vmoat VM nobody is using, returning its RAM to macOS.
   provision     Create/start the worktree's VM; install toolchain; seed files.
   ssh [cmd]     Shell into the VM (or run a command in the worktree dir).
-  down          Stop the VM (keeps disk).
+  down [vm]     Stop the VM: frees its host RAM, keeps disk ('up' resumes).
+                With a name from 'vmoat ls', stops that VM from anywhere.
   destroy [-f]  Delete the VM entirely.
   name          Print the VM/profile name for this worktree.
 
@@ -50,9 +63,40 @@ main() {
     version|--version) printf 'vmoat %s\n' "$WTVM_VERSION"; exit 0 ;;
   esac
 
+  # `ls` spans every worktree, so it also works outside a repo (default prefix).
+  if [ "$cmd" = "ls" ]; then
+    if git rev-parse --show-toplevel >/dev/null 2>&1; then resolve_repo; load_config; fi
+    VM=""; cmd_ls; exit 0
+  fi
+  # `reap` also spans every worktree (and runs from launchd, outside any repo).
+  if [ "$cmd" = "reap" ]; then
+    if git rev-parse --show-toplevel >/dev/null 2>&1; then resolve_repo; load_config; fi
+    VM=""; cmd_reap "$@"; exit 0
+  fi
+  # `down <vm>` parks any VM by its `vmoat ls` name, from anywhere.
+  if [ "$cmd" = "down" ] && [ -n "${1:-}" ]; then
+    VM="$1"; vm_exists || die "No VM named '$VM' (see 'vmoat ls')."
+    cmd_down; exit 0
+  fi
+
+  # Creation-time options for up/provision (they only matter when the VM is
+  # created): --reclaim = MEMORY_RECLAIM=1, --fresh = don't clone a base image.
+  case "$cmd" in up|provision)
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --reclaim)      VMOAT_RECLAIM_FLAG=1 ;;
+        --reclaim=auto) VMOAT_RECLAIM_FLAG=auto ;;
+        --fresh)   VMOAT_FRESH=1 ;;
+        *) die "Unknown option for $cmd: '$1' (--reclaim, --reclaim=auto, --fresh)." ;;
+      esac
+      shift
+    done ;;
+  esac
+
   resolve_repo
   load_config
   VM=$(vm_name)
+  case "$cmd" in name|init|destroy) ;; *) touch_last_used ;; esac
 
   case "$cmd" in
     init)      cmd_init ;;
@@ -62,6 +106,7 @@ main() {
     tunnel)    cmd_tunnel "$@" ;;
     untunnel)  cmd_untunnel ;;
     status)    cmd_status ;;
+    base)      cmd_base "$@" ;;
     ssh)       cmd_ssh "$@" ;;
     down)      cmd_down ;;
     destroy)   if [ "${1:-}" = "-f" ]; then WTVM_FORCE=1; fi; cmd_destroy ;;
@@ -70,5 +115,5 @@ main() {
   esac
 }
 
-WTVM_VERSION="0.1.0"
+WTVM_VERSION="0.2.0"
 main "$@"

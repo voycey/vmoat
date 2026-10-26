@@ -1,6 +1,6 @@
 {
   "name": "vmoat",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "One ephemeral Colima VM per git worktree: build and test multiple worktrees in parallel, each fully isolated in its own kernel + Docker daemon. Drives the project's stock build/test commands inside the VM.",
   "author": { "name": "Dan Voyce" },
   "homepage": "https://github.com/voycey/vmoat",

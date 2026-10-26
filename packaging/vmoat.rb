@@ -12,7 +12,7 @@ class Vmoat < Formula
   depends_on "colima"
 
   def install
-    libexec.install "bin", "lib"
+    libexec.install "bin", "lib", "scripts"   # scripts/build-krunkit.sh for --reclaim
     bin.install_symlink libexec/"bin/vmoat"
   end
 
